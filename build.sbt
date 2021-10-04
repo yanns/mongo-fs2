@@ -12,6 +12,7 @@ lazy val root = (project in file("."))
       "org.typelevel" %% "cats-effect" % "3.2.9",
       "co.fs2" %% "fs2-core" % "3.1.3",
       "co.fs2" %% "fs2-reactive-streams" % "3.1.3",
-      "org.mongodb.scala" %% "mongo-scala-driver" % "4.3.2"
+      "org.mongodb.scala" %% "mongo-scala-driver" % "4.3.2",
+      "com.typesafe.akka" %% "akka-stream" % "2.6.16"
     )
   )
