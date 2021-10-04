@@ -6,7 +6,7 @@ import org.mongodb.scala.bson.collection.immutable.Document
 import org.mongodb.scala.result.{InsertManyResult, InsertOneResult}
 
 object Populate extends IOApp.Simple {
-  val toInsert = 5_000
+  val toInsert = 1_000
   val chunkSize = 100
   val outputEvery = 100
 
@@ -15,10 +15,10 @@ object Populate extends IOApp.Simple {
       val db = client.getDatabase("mydb")
       val collection = db.getCollection("test")
       for {
-        _ <- IO.fromFuture(IO(db.drop().head()))
+        _ <- IO.fromFuture(IO(collection.drop().head()))
         _ <- IO.println("=".*(toInsert / outputEvery))
         inserted <- fs2.Stream
-          .range(0, toInsert)
+          .range(1, toInsert)
           .lift[IO]
           .mapAsync(1) { i =>
             for {
