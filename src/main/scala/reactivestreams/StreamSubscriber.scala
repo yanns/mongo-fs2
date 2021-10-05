@@ -9,7 +9,6 @@ import fs2._
 
 import java.util.concurrent.atomic.AtomicReference
 import scala.annotation.nowarn
-import scala.collection.mutable
 
 /** Implementation of a `org.reactivestreams.Subscriber`.
   *
@@ -120,11 +119,11 @@ object StreamSubscriber {
 
     sealed trait State
     case object Uninitialized extends State
-    case class Idle(sub: Subscription, buffer: mutable.Buffer[A]) extends State
+    case class Idle(sub: Subscription, buffer: Vector[A]) extends State
     case class RequestBeforeSubscription(req: Out => Unit) extends State
     case class WaitingOnUpstream(
         sub: Subscription,
-        buffer: mutable.Buffer[A],
+        buffer: Vector[A],
         elementRequest: Out => Unit
     ) extends State
     case object UpstreamCompletion extends State
@@ -141,10 +140,10 @@ object StreamSubscriber {
       in match {
         case OnSubscribe(s) => {
           case RequestBeforeSubscription(req) =>
-            WaitingOnUpstream(s, mutable.Buffer.empty, req) -> (() =>
+            WaitingOnUpstream(s, Vector.empty, req) -> (() =>
               s.request(bufferSize)
             )
-          case Uninitialized => Idle(s, mutable.Buffer.empty) -> (() => ())
+          case Uninitialized => Idle(s, Vector.empty) -> (() => ())
           case o =>
             val err = new Error(s"received subscription in invalid state [$o]")
             o -> { () =>
@@ -154,10 +153,10 @@ object StreamSubscriber {
         }
         case OnNext(a) => {
           case WaitingOnUpstream(s, buffer, r) =>
-            val newBuffer = buffer.append(a)
+            val newBuffer = buffer.appended(a)
             if (newBuffer.size == bufferSize) {
-              val chunk = Chunk.buffer(newBuffer)
-              Idle(s, mutable.Buffer.empty) -> (() => r(chunk.some.asRight))
+              val chunk = Chunk.vector(newBuffer)
+              Idle(s, Vector.empty) -> (() => r(chunk.some.asRight))
             } else
               WaitingOnUpstream(s, newBuffer, r) -> (() => ())
           case DownstreamCancellation => DownstreamCancellation -> (() => ())
@@ -171,7 +170,7 @@ object StreamSubscriber {
         case OnComplete => {
           case WaitingOnUpstream(s, buffer, r) =>
             if (buffer.nonEmpty) {
-              val chunk = Chunk.buffer(buffer)
+              val chunk = Chunk.vector(buffer)
               UpstreamCompletion -> (() => r(chunk.some.asRight))
             } else {
               UpstreamCompletion -> (() => r(None.asRight))
