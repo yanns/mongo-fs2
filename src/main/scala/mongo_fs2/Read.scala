@@ -36,8 +36,7 @@ object Read extends IOApp.Simple {
     val findPublisher = DebugRX.readAllDocuments(collection)
 
     findPublisher
-      .toStream[IO]
-      .chunkN(100)
+      .toStream[IO](bufferSize = 421L)
       .map(_.size.toLong)
       .foldMonoid
       .compile

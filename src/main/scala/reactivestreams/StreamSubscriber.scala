@@ -9,6 +9,7 @@ import fs2._
 
 import java.util.concurrent.atomic.AtomicReference
 import scala.annotation.nowarn
+import scala.collection.mutable
 
 /** Implementation of a `org.reactivestreams.Subscriber`.
   *
@@ -51,7 +52,7 @@ final class StreamSubscriber[F[_], A](
     sub.onError(t)
   }
 
-  def stream(subscribe: F[Unit]): Stream[F, A] = sub.stream(subscribe)
+  def stream(subscribe: F[Unit]): Stream[F, Chunk[A]] = sub.stream(subscribe)
 
   private def nonNull[B](b: B): Unit =
     if (b == null) throw new NullPointerException()
@@ -59,8 +60,11 @@ final class StreamSubscriber[F[_], A](
 
 object StreamSubscriber {
 
+  def apply[F[_]: Async, A](bufferSize: Long): F[StreamSubscriber[F, A]] =
+    fsm[F, A](bufferSize).map(new StreamSubscriber(_))
+
   def apply[F[_]: Async, A]: F[StreamSubscriber[F, A]] =
-    fsm[F, A].map(new StreamSubscriber(_))
+    apply(bufferSize = 1L)
 
   @deprecated("Use apply method without dispatcher instead", "3.1.4")
   @nowarn("cat=unused-params")
@@ -88,12 +92,12 @@ object StreamSubscriber {
     def onFinalize: F[Unit]
 
     /** producer for downstream */
-    def dequeue1: F[Either[Throwable, Option[A]]]
+    def dequeue1: F[Either[Throwable, Option[Chunk[A]]]]
 
     /** downstream stream */
     def stream(
         subscribe: F[Unit]
-    )(implicit ev: ApplicativeError[F, Throwable]): Stream[F, A] =
+    )(implicit ev: ApplicativeError[F, Throwable]): Stream[F, Chunk[A]] =
       Stream.bracket(subscribe)(_ => onFinalize) >> Stream
         .eval(dequeue1)
         .repeat
@@ -101,10 +105,10 @@ object StreamSubscriber {
         .unNoneTerminate
   }
 
-  private[reactivestreams] def fsm[F[_], A](implicit
+  private[reactivestreams] def fsm[F[_], A](bufferSize: Long)(implicit
       F: Async[F]
   ): F[FSM[F, A]] = {
-    type Out = Either[Throwable, Option[A]]
+    type Out = Either[Throwable, Option[Chunk[A]]]
 
     sealed trait Input
     case class OnSubscribe(s: Subscription) extends Input
@@ -116,10 +120,13 @@ object StreamSubscriber {
 
     sealed trait State
     case object Uninitialized extends State
-    case class Idle(sub: Subscription) extends State
+    case class Idle(sub: Subscription, buffer: mutable.Buffer[A]) extends State
     case class RequestBeforeSubscription(req: Out => Unit) extends State
-    case class WaitingOnUpstream(sub: Subscription, elementRequest: Out => Unit)
-        extends State
+    case class WaitingOnUpstream(
+        sub: Subscription,
+        buffer: mutable.Buffer[A],
+        elementRequest: Out => Unit
+    ) extends State
     case object UpstreamCompletion extends State
     case object DownstreamCancellation extends State
     case class UpstreamError(err: Throwable) extends State
@@ -134,8 +141,10 @@ object StreamSubscriber {
       in match {
         case OnSubscribe(s) => {
           case RequestBeforeSubscription(req) =>
-            WaitingOnUpstream(s, req) -> (() => s.request(1))
-          case Uninitialized => Idle(s) -> (() => ())
+            WaitingOnUpstream(s, mutable.Buffer.empty, req) -> (() =>
+              s.request(bufferSize)
+            )
+          case Uninitialized => Idle(s, mutable.Buffer.empty) -> (() => ())
           case o =>
             val err = new Error(s"received subscription in invalid state [$o]")
             o -> { () =>
@@ -144,8 +153,14 @@ object StreamSubscriber {
             }
         }
         case OnNext(a) => {
-          case WaitingOnUpstream(s, r) => Idle(s) -> (() => r(a.some.asRight))
-          case DownstreamCancellation  => DownstreamCancellation -> (() => ())
+          case WaitingOnUpstream(s, buffer, r) =>
+            val newBuffer = buffer.append(a)
+            if (newBuffer.size == bufferSize) {
+              val chunk = Chunk.buffer(newBuffer)
+              Idle(s, mutable.Buffer.empty) -> (() => r(chunk.some.asRight))
+            } else
+              WaitingOnUpstream(s, newBuffer, r) -> (() => ())
+          case DownstreamCancellation => DownstreamCancellation -> (() => ())
           case o =>
             o -> (() =>
               reportFailure(
@@ -154,27 +169,34 @@ object StreamSubscriber {
             )
         }
         case OnComplete => {
-          case WaitingOnUpstream(_, r) =>
-            UpstreamCompletion -> (() => r(None.asRight))
+          case WaitingOnUpstream(s, buffer, r) =>
+            if (buffer.nonEmpty) {
+              val chunk = Chunk.buffer(buffer)
+              UpstreamCompletion -> (() => r(chunk.some.asRight))
+            } else {
+              UpstreamCompletion -> (() => r(None.asRight))
+            }
           case _ => UpstreamCompletion -> (() => ())
         }
         case OnError(e) => {
-          case WaitingOnUpstream(_, r) =>
+          case WaitingOnUpstream(_, _, r) =>
             UpstreamError(e) -> (() => r(e.asLeft))
           case _ => UpstreamError(e) -> (() => ())
         }
         case OnFinalize => {
-          case WaitingOnUpstream(sub, r) =>
+          case WaitingOnUpstream(sub, buffer, r) =>
             DownstreamCancellation -> { () =>
               sub.cancel()
               r(None.asRight)
             }
-          case Idle(sub) => DownstreamCancellation -> (() => sub.cancel())
-          case o         => o -> (() => ())
+          case Idle(sub, _) =>
+            DownstreamCancellation -> (() => sub.cancel())
+          case o => o -> (() => ())
         }
         case OnDequeue(r) => {
           case Uninitialized => RequestBeforeSubscription(r) -> (() => ())
-          case Idle(sub) => WaitingOnUpstream(sub, r) -> (() => sub.request(1))
+          case Idle(sub, buffer) =>
+            WaitingOnUpstream(sub, buffer, r) -> (() => sub.request(bufferSize))
           case err @ UpstreamError(e) => err -> (() => r(e.asLeft))
           case UpstreamCompletion =>
             UpstreamCompletion -> (() => r(None.asRight))
@@ -199,8 +221,8 @@ object StreamSubscriber {
           def onError(t: Throwable): Unit = nextState(OnError(t))
           def onComplete(): Unit = nextState(OnComplete)
           def onFinalize: F[Unit] = F.delay(nextState(OnFinalize))
-          def dequeue1: F[Either[Throwable, Option[A]]] =
-            F.async_[Either[Throwable, Option[A]]] { cb =>
+          def dequeue1: F[Either[Throwable, Option[Chunk[A]]]] =
+            F.async_[Either[Throwable, Option[Chunk[A]]]] { cb =>
               nextState(OnDequeue(out => cb(Right(out))))
             }
         }
