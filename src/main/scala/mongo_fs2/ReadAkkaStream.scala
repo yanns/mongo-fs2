@@ -6,8 +6,6 @@ import cats.effect.{IO, IOApp, Resource}
 import com.mongodb.reactivestreams.client.MongoCollection
 import org.bson.Document
 
-import scala.concurrent.ExecutionContext
-
 object ReadAkkaStream extends IOApp.Simple {
 
   private val actorSystemR: Resource[IO, ActorSystem] =

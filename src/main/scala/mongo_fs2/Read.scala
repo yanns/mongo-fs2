@@ -1,20 +1,13 @@
 package mongo_fs2
 
 import cats.effect.{IO, IOApp}
-import com.mongodb.client.model.Collation
-import com.mongodb.{CursorType, ExplainVerbosity}
-import com.mongodb.reactivestreams.client.{FindPublisher, MongoCollection}
+import com.mongodb.reactivestreams.client.MongoCollection
 import org.bson.Document
-import org.bson.conversions.Bson
-import org.reactivestreams.{Publisher, Subscriber, Subscription}
-
-import java.lang
-import java.util.concurrent.TimeUnit
-import scala.collection.concurrent.TrieMap
 
 object Read extends IOApp.Simple {
   override def run: IO[Unit] = MongoClient.reactiveClient.use { client =>
     val db = client.getDatabase("mydb")
+
     val collection = db.getCollection("test")
     for {
       start <- IO.monotonic
@@ -38,7 +31,7 @@ object Read extends IOApp.Simple {
   private def readAllDocuments(
       collection: MongoCollection[Document]
   ): IO[Long] = {
-    import fs2.interop.reactivestreams._
+    import reactivestreams._
 
     val findPublisher = DebugRX.readAllDocuments(collection)
 
