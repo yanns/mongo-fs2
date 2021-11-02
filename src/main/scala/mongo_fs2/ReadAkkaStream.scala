@@ -40,7 +40,7 @@ object ReadAkkaStream extends IOApp.Simple {
   private def readAllDocuments(
       collection: MongoCollection[Document]
   )(implicit system: ActorSystem): IO[Long] = {
-    val findPublisher = DebugRX.readAllDocuments(collection)
+    val findPublisher = DebugRX.debuggingPublisher(collection.find())
 
     IO.fromFuture(
       IO(

@@ -11,10 +11,9 @@ import java.util.concurrent.TimeUnit
 
 object DebugRX {
 
-  def readAllDocuments(
-      collection: MongoCollection[Document]
+  def debuggingPublisher(
+      originalPublisher: FindPublisher[Document]
   ): FindPublisher[Document] = {
-    val originalPublisher = collection.find()
     val findPublisher = new FindPublisher[Document] {
       type D >: Document
       override def first(): Publisher[Document] = originalPublisher.first()

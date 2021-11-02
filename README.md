@@ -16,3 +16,25 @@ Mongo log:
 ```
 "command":{"getMore":5259084578442247860,"collection":"test","batchSize":8
 ```
+
+# Try it yourself
+
+## start mongo
+
+```
+docker-compose up -d
+```
+
+## Inject some data
+
+in sbt:
+```
+runMain mongo_fs2.Populate
+```
+
+## Read data
+in sbt:
+```
+run
+```
+and select the main class to run

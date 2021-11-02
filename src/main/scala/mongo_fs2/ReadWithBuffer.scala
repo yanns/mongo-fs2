@@ -4,7 +4,7 @@ import cats.effect.{IO, IOApp}
 import com.mongodb.reactivestreams.client.MongoCollection
 import org.bson.Document
 
-object Read2 extends IOApp.Simple {
+object ReadWithBuffer extends IOApp.Simple {
   override def run: IO[Unit] = MongoClient.reactiveClient.use { client =>
     val db = client.getDatabase("mydb")
 
@@ -14,7 +14,7 @@ object Read2 extends IOApp.Simple {
       _ <- fs2.Stream
         .range(0, 1)
         .lift[IO]
-        .parEvalMap(10) { i =>
+        .parEvalMap(Int.MaxValue) { i =>
           for {
             _ <- IO.println(s"starting reading with worker $i")
             count <- readAllDocuments(collection)
@@ -35,13 +35,11 @@ object Read2 extends IOApp.Simple {
 
     val findPublisher = DebugRX.debuggingPublisher(collection.find())
 
-    for {
-      stream <- StreamSubscriber2.fromPublisher(findPublisher, bufferSize = 43)
-      result <- stream
-        .map(_.size.toLong)
-        .foldMonoid
-        .compile
-        .lastOrError
-    } yield result
+    findPublisher
+      .toStream[IO](bufferSize = 421L)
+      .map(_.size.toLong)
+      .foldMonoid
+      .compile
+      .lastOrError
   }
 }
