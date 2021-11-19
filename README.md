@@ -2,7 +2,7 @@
 
 The mongo driver exposes query cursors as reactive publisher.
 
-When using FS2 interoperability with reactive streams, I can observe that we query elements one by one, leading to a lot of DB queries, leading to bad performances.
+When using FS2 interoperability with reactive streams, I could observe that we query elements one by one, leading to a lot of DB queries, leading to bad performances.
 
 
 ## with FS2:
@@ -38,3 +38,7 @@ in sbt:
 run
 ```
 and select the main class to run
+
+# Fix
+
+After several discussions, we can up with a way to demand several elements at the same time: https://github.com/typelevel/fs2/pull/2666
